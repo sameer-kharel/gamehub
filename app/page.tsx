@@ -29,6 +29,42 @@ export default function Home() {
   const [games, setGames] = useState<IGame[]>([]);
   const [hallOfShame, setHallOfShame] = useState<IHallOfShame[]>([]);
 
+  // Booking Modal State
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [bookingForm, setBookingForm] = useState({
+    name: '',
+    email: '',
+    date: '',
+    notes: ''
+  });
+  const [bookingStatus, setBookingStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+
+  const handleBookingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBookingStatus('submitting');
+
+    try {
+      const res = await fetch('/api/appointments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bookingForm),
+      });
+
+      if (res.ok) {
+        setBookingStatus('success');
+        setBookingForm({ name: '', email: '', date: '', notes: '' });
+        setTimeout(() => {
+          setShowBookingModal(false);
+          setBookingStatus('idle');
+        }, 2000);
+      } else {
+        setBookingStatus('error');
+      }
+    } catch (error) {
+      setBookingStatus('error');
+    }
+  };
+
   useEffect(() => {
     setTimeout(() => setShowContent(true), 1200);
     fetchData();
@@ -72,6 +108,90 @@ export default function Home() {
     <>
       {/* 3D Scene */}
       <Scene scrollProgress={progress} />
+
+      {/* Booking Modal */}
+      {showBookingModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md animate-[fadeIn_0.3s_ease-out]" onClick={() => setShowBookingModal(false)} />
+          <div className="relative bg-[#0a0a15] border border-[#ff00ff]/30 rounded-2xl p-6 md:p-8 w-full max-w-md shadow-[0_0_50px_rgba(255,0,255,0.2)] animate-[scaleIn_0.2s_ease-out]">
+            <button
+              onClick={() => setShowBookingModal(false)}
+              className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
+            >
+              ✕
+            </button>
+
+            <h3 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[#ff00ff] to-[#00d4ff] mb-1 uppercase tracking-wider">Book Your Spot</h3>
+            <p className="text-gray-400 text-sm mb-6">Reserve your gaming session in advance.</p>
+
+            {bookingStatus === 'success' ? (
+              <div className="text-center py-8">
+                <div className="text-5xl mb-4">✅</div>
+                <h4 className="text-xl font-bold text-white mb-2">Booking Requested!</h4>
+                <p className="text-gray-400">We'll see you soon at MT GameHub.</p>
+              </div>
+            ) : (
+              <form onSubmit={handleBookingSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Your Name</label>
+                  <input
+                    type="text"
+                    required
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:border-[#ff00ff] focus:outline-none transition-colors"
+                    placeholder="Enter your name"
+                    value={bookingForm.name}
+                    onChange={e => setBookingForm({ ...bookingForm, name: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Date & Time</label>
+                  <input
+                    type="datetime-local"
+                    required
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:border-[#ff00ff] focus:outline-none transition-colors [color-scheme:dark]"
+                    value={bookingForm.date}
+                    onChange={e => setBookingForm({ ...bookingForm, date: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Contact Info</label>
+                  <input
+                    type="text"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:border-[#ff00ff] focus:outline-none transition-colors"
+                    placeholder="Phone number or Email"
+                    value={bookingForm.email}
+                    onChange={e => setBookingForm({ ...bookingForm, email: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Notes (Optional)</label>
+                  <textarea
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:border-[#ff00ff] focus:outline-none transition-colors resize-none h-20"
+                    placeholder="Specific console preference?"
+                    value={bookingForm.notes}
+                    onChange={e => setBookingForm({ ...bookingForm, notes: e.target.value })}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={bookingStatus === 'submitting'}
+                  className="w-full bg-gradient-to-r from-[#ff00ff] to-[#00d4ff] text-white font-bold py-3 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 mt-2"
+                >
+                  {bookingStatus === 'submitting' ? 'Booking...' : 'Confirm Booking'}
+                </button>
+
+                {bookingStatus === 'error' && (
+                  <p className="text-red-500 text-xs text-center mt-2">Failed to submit. Please try again.</p>
+                )}
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Navigation */}
       <nav className={`fixed top-0 left-0 right-0 z-50 transition-opacity duration-700 ${showContent ? 'opacity-100' : 'opacity-0'}`}>
@@ -142,12 +262,19 @@ export default function Home() {
             <p className="text-xl md:text-2xl text-white mb-2">Play. Compete. Repeat.</p>
             <p className="text-gray-400 mb-8">Premium Gaming in Sagarmatha Chowk, Jhapa</p>
 
-            <div className={`flex items-center justify-center gap-4 ${phaseIndex === 0 ? 'pointer-events-auto' : 'pointer-events-none'}`}>
+            <div className={`flex flex-col md:flex-row items-center justify-center gap-4 ${phaseIndex === 0 ? 'pointer-events-auto' : 'pointer-events-none'}`}>
               <button
                 onClick={() => scrollTo(0.35)}
-                className="px-8 py-4 bg-gradient-to-r from-[#ff00ff] to-[#ff00aa] rounded-lg font-bold text-white uppercase tracking-wider hover:scale-105 transition-transform"
+                className="px-8 py-4 bg-gradient-to-r from-[#ff00ff] to-[#ff00aa] rounded-lg font-bold text-white uppercase tracking-wider hover:scale-105 transition-transform w-[240px]"
               >
                 Explore Games
+              </button>
+
+              <button
+                onClick={() => setShowBookingModal(true)}
+                className="px-8 py-4 bg-white/10 border border-white/20 backdrop-blur rounded-lg font-bold text-white uppercase tracking-wider hover:bg-white/20 hover:scale-105 transition-all w-[240px]"
+              >
+                Book Appointment
               </button>
             </div>
 

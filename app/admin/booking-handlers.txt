@@ -1,0 +1,87 @@
+// Booking Management Handlers - Add these to admin/page.tsx after the existing handlers
+
+const handleCreateBooking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!newBooking.userName.trim()) {
+        showMessage('Please enter a user name', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/bookings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newBooking),
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok) {
+            setNewBooking({
+                userName: '',
+                duration: 1,
+                consoleNumber: 1,
+                paymentMethod: 'Cash',
+                notes: '',
+            });
+            fetchBookingsData();
+            showMessage('Booking created successfully!', 'success');
+        } else {
+            showMessage(data.error || 'Failed to create booking', 'error');
+        }
+    } catch (error) {
+        showMessage('Failed to create booking', 'error');
+    }
+};
+
+const handleEndSession = async (bookingId: string) => {
+    if (!confirm('End this session?')) return;
+    
+    try {
+        const res = await fetch(`/api/bookings/${bookingId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'end' }),
+        });
+        
+        if (res.ok) {
+            fetchBookingsData();
+            showMessage('Session ended successfully', 'success');
+        } else {
+            showMessage('Failed to end session', 'error');
+        }
+    } catch (error) {
+        showMessage('Failed to end session', 'error');
+    }
+};
+
+const handleMarkPaid = async (bookingId: string, isPaid: boolean) => {
+    try {
+        const res = await fetch(`/api/bookings/${bookingId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ isPaid }),
+        });
+        
+        if (res.ok) {
+            fetchBookingsData();
+            showMessage(`Marked as ${isPaid ? 'paid' : 'unpaid'}`, 'success');
+        }
+    } catch (error) {
+        showMessage('Failed to update payment status', 'error');
+    }
+};
+
+const getSessionDuration = (startTime: Date) => {
+    const now = new Date();
+    const start = new Date(startTime);
+    const diff = now.getTime() - start.getTime();
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hours}h ${minutes}m`;
+};
+
+const getAvailableConsoles = () => {
+    return consoles.filter(c => c.status === 'available');
+};
