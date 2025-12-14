@@ -8,7 +8,7 @@ import { IBooking } from '@/models/Booking';
 import { IConsole } from '@/models/Console';
 
 export default function AdminDashboard() {
-    const [activeTab, setActiveTab] = useState<'bookings' | 'appointments' | 'hallofshame' | 'users' | 'games'>('bookings');
+    const [activeTab, setActiveTab] = useState<'bookings' | 'appointments' | 'hallofshame' | 'users' | 'games' | 'summary'>('bookings');
     const [appointments, setAppointments] = useState<IAppointment[]>([]);
     const [hallOfShame, setHallOfShame] = useState<IHallOfShame[]>([]);
     const [games, setGames] = useState<IGame[]>([]);
@@ -47,6 +47,9 @@ export default function AdminDashboard() {
 
     const [message, setMessage] = useState({ text: '', type: '' });
     const [newConsoleName, setNewConsoleName] = useState('');
+    const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+    const [paymentMethod, setPaymentMethod] = useState('Cash');
 
     useEffect(() => {
         fetchData();
@@ -90,7 +93,7 @@ export default function AdminDashboard() {
     const fetchBookingsData = async () => {
         try {
             const [bookingsRes, consolesRes, analyticsRes] = await Promise.all([
-                fetch('/api/bookings?status=active', { cache: 'no-store' }),
+                fetch('/api/bookings', { cache: 'no-store' }),
                 fetch('/api/consoles', { cache: 'no-store' }),
                 fetch(`/api/analytics?period=${analyticsPeriod}`, { cache: 'no-store' }),
             ]);
@@ -121,6 +124,34 @@ export default function AdminDashboard() {
             }
         }
     }, [consoles]);
+
+    const handleDeleteConsole = async (id: string) => {
+        if (!confirm('Are you sure you want to delete this console?')) return;
+        try {
+            console.log('Attempting to delete console:', id);
+
+            // Optimistic update
+            setConsoles(prev => prev.filter(c => String(c._id) !== id));
+
+            const res = await fetch(`/api/consoles/${id}`, { method: 'DELETE' });
+            console.log('Delete response status:', res.status);
+
+            if (res.ok) {
+                console.log('Delete success, refreshing data...');
+                await fetchBookingsData(); // Sync with server for full correctness
+                showMessage('Console deleted', 'success');
+            } else {
+                const err = await res.json();
+                console.error('Delete failed:', err);
+                showMessage('Failed to delete console', 'error');
+                fetchBookingsData(); // Revert on failure
+            }
+        } catch (error) {
+            console.error('Delete error:', error);
+            showMessage('Failed to delete console', 'error');
+            fetchBookingsData(); // Revert on failure
+        }
+    };
 
     const handleAppointmentAction = async (id: string, status: 'approved' | 'rejected') => {
         try {
@@ -172,6 +203,7 @@ export default function AdminDashboard() {
             showMessage(`Error: ${(error as Error).message}`, 'error');
         }
     };
+
 
     const handleDeleteShame = async (id: string) => {
         if (!confirm('Are you sure?')) return;
@@ -327,19 +359,27 @@ export default function AdminDashboard() {
         }
     };
 
-    const handleEndSession = async (bookingId: string) => {
-        if (!confirm('End this session?')) return;
+    const handleEndSessionClick = (bookingId: string) => {
+        setSelectedBookingId(bookingId);
+        setShowPaymentModal(true);
+    };
+
+    const confirmEndSession = async () => {
+        if (!selectedBookingId) return;
 
         try {
-            const res = await fetch(`/api/bookings/${bookingId}`, {
+            const res = await fetch(`/api/bookings/${selectedBookingId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'end' }),
+                body: JSON.stringify({ action: 'end', paymentMethod }),
             });
 
             if (res.ok) {
                 fetchBookingsData();
-                showMessage('Session ended successfully', 'success');
+                setShowPaymentModal(false);
+                setSelectedBookingId(null);
+                setPaymentMethod('Cash');
+                showMessage('Session completed and payment recorded', 'success');
             } else {
                 showMessage('Failed to end session', 'error');
             }
@@ -429,218 +469,272 @@ export default function AdminDashboard() {
                 >
                     User Management
                 </button>
+                <button
+                    onClick={() => setActiveTab('summary')}
+                    className={`px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${activeTab === 'summary' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:bg-zinc-800'}`}
+                >
+                    Summary
+                </button>
             </div>
 
             {/* Content */}
             <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
                 {activeTab === 'bookings' && (
                     <div className="space-y-8">
+                        {/* Today's Revenue Card */}
+                        <div className="bg-gradient-to-r from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 p-6 rounded-xl flex items-center justify-between">
+                            <div>
+                                <p className="text-indigo-400 text-sm font-medium mb-1">Today's Revenue (24h)</p>
+                                <h3 className="text-4xl font-bold text-white">
+                                    NPR {bookings.filter(b => {
+                                        const bookingDate = new Date(b.startTime);
+                                        const today = new Date();
+                                        return bookingDate.getDate() === today.getDate() &&
+                                            bookingDate.getMonth() === today.getMonth() &&
+                                            bookingDate.getFullYear() === today.getFullYear();
+                                    }).reduce((sum, b) => sum + (b.totalAmount || 0), 0)}
+                                </h3>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-zinc-400 text-xs">Sessions Today</p>
+                                <p className="text-2xl font-bold text-white">
+                                    {bookings.filter(b => {
+                                        const bookingDate = new Date(b.startTime);
+                                        const today = new Date();
+                                        return bookingDate.getDate() === today.getDate() &&
+                                            bookingDate.getMonth() === today.getMonth() &&
+                                            bookingDate.getFullYear() === today.getFullYear();
+                                    }).length}
+                                </p>
+                            </div>
+                        </div>
+
+
                         {/* Console Status Cards */}
                         <div>
-                            <h2 className="text-xl font-semibold text-white mb-4">PS4 Console Status</h2>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                                <span>🎮</span> Console Status
+                            </h2>
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                                 {consoles.map((console: any) => (
                                     <div
                                         key={console._id}
-                                        className={`p-6 rounded-lg border-2 transition-all ${console.status === 'available' ? 'bg-green-500/10 border-green-500/50' :
-                                            console.status === 'in-use' ? 'bg-red-500/10 border-red-500/50' :
-                                                'bg-yellow-500/10 border-yellow-500/50'
+                                        className={`relative group p-4 rounded-xl border transition-all duration-300 hover:-translate-y-1 hover:shadow-xl overflow-hidden ${console.status === 'available'
+                                            ? 'bg-zinc-900/50 border-green-500/30 hover:border-green-500/60 hover:shadow-green-900/20'
+                                            : console.status === 'in-use'
+                                                ? 'bg-zinc-900/50 border-red-500/30 hover:border-red-500/60 hover:shadow-red-900/20'
+                                                : 'bg-zinc-900/50 border-yellow-500/30 hover:border-yellow-500/60 hover:shadow-yellow-900/20'
                                             }`}
                                     >
-                                        <div className="flex items-center justify-between mb-2">
+                                        {/* Status LED */}
+                                        <div className={`absolute top-4 right-4 w-3 h-3 rounded-full shadow-[0_0_10px_currentColor] animate-pulse ${console.status === 'available' ? 'bg-green-500 text-green-500' :
+                                            console.status === 'in-use' ? 'bg-red-500 text-red-500' :
+                                                'bg-yellow-500 text-yellow-500'
+                                            }`} />
+
+                                        <div className="flex flex-col h-full justify-between">
                                             <div>
-                                                <h3 className="text-lg font-bold text-white">{console.name}</h3>
-                                                {console.status === 'in-use' && console.currentBookingId && (
-                                                    <p className="text-xs text-indigo-400 font-medium">
-                                                        👤 {console.currentBookingId.userName}
-                                                    </p>
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <h3 className="text-lg font-bold text-white tracking-wider">{console.name}</h3>
+                                                </div>
+                                                <p className={`text-xs font-semibold uppercase tracking-widest ${console.status === 'available' ? 'text-green-400' :
+                                                    console.status === 'in-use' ? 'text-red-400' :
+                                                        'text-yellow-400'
+                                                    }`}>
+                                                    {console.status === 'available' ? 'Available' :
+                                                        console.status === 'in-use' ? 'Occupied' :
+                                                            'Maintenance'}
+                                                </p>
+                                                {/* Show current user if in use */}
+                                                {console.status === 'in-use' && (() => {
+                                                    const activeBooking = bookings.find(b => b.status === 'active' && b.consoleNumber === console.consoleNumber);
+                                                    return activeBooking ? (
+                                                        <div className="mt-3 bg-zinc-800/50 rounded-lg p-2 border border-zinc-700/50">
+                                                            <p className="text-zinc-400 text-xs">Player:</p>
+                                                            <p className="text-white font-medium truncate">{activeBooking.userName}</p>
+                                                            <p className="text-zinc-500 text-xs mt-1">{getSessionDuration(activeBooking.startTime)} elapsed</p>
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-zinc-500 text-xs mt-2">Active</p>
+                                                    );
+                                                })()}
+                                            </div>
+
+                                            {/* Action Bar */}
+                                            <div className="mt-4 pt-3 border-t border-zinc-800 flex justify-between items-center">
+                                                <div className="text-zinc-600">
+                                                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-10 7H8v3H6v-3H3v-2h3V8h2v3h3v2zm4.5 2c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm4 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" /></svg>
+                                                </div>
+                                                {console.status === 'available' && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleDeleteConsole(console._id); }}
+                                                        className="opacity-0 group-hover:opacity-100 transition-opacity bg-red-500/10 hover:bg-red-500/20 text-red-500 p-2 rounded-lg"
+                                                        title="Delete Console"
+                                                    >
+                                                        🗑️
+                                                    </button>
                                                 )}
                                             </div>
-                                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${console.status === 'available' ? 'bg-green-500 text-white' :
-                                                console.status === 'in-use' ? 'bg-red-500 text-white' :
-                                                    'bg-yellow-500 text-black'
-                                                }`}>
-                                                {console.status === 'available' ? '✓ Available' :
-                                                    console.status === 'in-use' ? '🎮 In Use' :
-                                                        '🔧 Maintenance'}
-                                            </span>
                                         </div>
-                                        {console.status === 'in-use' && console.currentBookingId && (
-                                            <div className="mt-3 text-sm text-zinc-300">
-                                                <p className="font-medium">Current User: {bookings.find(b => String(b._id) === String(console.currentBookingId))?.userName || 'Unknown'}</p>
-                                            </div>
-                                        )}
                                     </div>
                                 ))}
                             </div>
                         </div>
 
-                        {/* Add Console Section */}
-                        <div className="bg-zinc-800/30 p-6 rounded-lg border border-zinc-700/50">
-                            <h3 className="text-lg font-medium text-white mb-4">Add New Console</h3>
-                            <form onSubmit={handleAddConsole} className="flex gap-4">
-                                <input
-                                    type="text"
-                                    placeholder="Console Name (e.g. PS4-4)"
-                                    className="bg-zinc-800 border-zinc-700 rounded-lg px-4 py-2 text-white placeholder:text-zinc-500 flex-1"
-                                    value={newConsoleName}
-                                    onChange={e => setNewConsoleName(e.target.value)}
-                                />
-                                <button
-                                    type="submit"
-                                    className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-500 font-medium transition-colors"
-                                >
-                                    Add Console
-                                </button>
-                            </form>
-                        </div>
-
-                        {/* Quick Add Booking Form */}
-                        <div className="bg-zinc-800/30 p-6 rounded-lg border border-zinc-700/50">
-                            <h3 className="text-lg font-medium text-white mb-4">🎮 Start New Session</h3>
-                            <form onSubmit={handleCreateBooking} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                <input
-                                    type="text"
-                                    placeholder="User Name"
-                                    required
-                                    className="bg-zinc-800 border-zinc-700 rounded-lg px-4 py-2 text-white placeholder:text-zinc-500"
-                                    value={newBooking.userName}
-                                    onChange={e => setNewBooking({ ...newBooking, userName: e.target.value })}
-                                />
-                                <select
-                                    required
-                                    className="bg-zinc-800 border-zinc-700 rounded-lg px-4 py-2 text-white"
-                                    value={newBooking.consoleNumber}
-                                    onChange={e => setNewBooking({ ...newBooking, consoleNumber: Number(e.target.value) })}
-                                >
-                                    {consoles.filter(c => c.status === 'available').map(c => (
-                                        <option key={c._id} value={c.consoleNumber}>{c.name}</option>
-                                    ))}
-                                    {getAvailableConsoles().length === 0 && <option value="">No consoles available</option>}
-                                </select>
-                                <select
-                                    className="bg-zinc-800 border-zinc-700 rounded-lg px-4 py-2 text-white"
-                                    value={newBooking.duration}
-                                    onChange={e => setNewBooking({ ...newBooking, duration: Number(e.target.value) })}
-                                >
-                                    <option value={0.5}>30 min - NPR 100</option>
-                                    <option value={1}>1 hour - NPR 200</option>
-                                    <option value={1.5}>1.5 hours - NPR 300</option>
-                                    <option value={2}>2 hours - NPR 400</option>
-                                    <option value={2.5}>2.5 hours - NPR 500</option>
-                                    <option value={3}>3 hours - NPR 600</option>
-                                </select>
-                                <button
-                                    type="submit"
-                                    className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-500 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                    disabled={getAvailableConsoles().length === 0}
-                                >
+                        {/* Quick Actions & Active Sessions Grid */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            {/* LEFT COLUMN: Start Session */}
+                            <div className="bg-zinc-800/30 p-6 rounded-xl border border-zinc-700/50 h-fit">
+                                <h3 className="text-lg font-medium text-white mb-4 flex items-center gap-2">
                                     Start Session
-                                </button>
-                            </form>
-                        </div>
-
-                        {/* Active Sessions */}
-                        <div>
-                            <h2 className="text-xl font-semibold text-white mb-4">Active Sessions</h2>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left text-sm text-zinc-400">
-                                    <thead className="bg-zinc-800/50 text-zinc-200 uppercase">
-                                        <tr>
-                                            <th className="px-6 py-3">User</th>
-                                            <th className="px-6 py-3">Console</th>
-                                            <th className="px-6 py-3">Start Time</th>
-                                            <th className="px-6 py-3">Duration</th>
-                                            <th className="px-6 py-3">Amount</th>
-                                            <th className="px-6 py-3">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-zinc-800">
-                                        {bookings.filter(b => b.status === 'active').map((booking: any) => (
-                                            <tr key={booking._id} className="hover:bg-zinc-800/30">
-                                                <td className="px-6 py-4 font-medium text-white">{booking.userName}</td>
-                                                <td className="px-6 py-4">PS4-{booking.consoleNumber}</td>
-                                                <td className="px-6 py-4">{new Date(booking.startTime).toLocaleTimeString()}</td>
-                                                <td className="px-6 py-4">
-                                                    <span className="text-green-400">{getSessionDuration(booking.startTime)}</span>
-                                                </td>
-                                                <td className="px-6 py-4 font-bold text-white">NPR {booking.totalAmount}</td>
-                                                <td className="px-6 py-4">
-                                                    <button
-                                                        onClick={() => handleEndSession(booking._id)}
-                                                        className="bg-red-600 hover:bg-red-500 text-white px-4 py-1 rounded text-xs font-medium transition-colors"
-                                                    >
-                                                        End Session
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                        {bookings.filter(b => b.status === 'active').length === 0 && (
-                                            <tr>
-                                                <td colSpan={6} className="px-6 py-8 text-center text-zinc-500">No active sessions</td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        {/* Revenue Analytics */}
-                        {analytics && (
-                            <div>
-                                <div className="flex items-center justify-between mb-4">
-                                    <h2 className="text-xl font-semibold text-white">Revenue Analytics</h2>
-                                    <div className="flex space-x-2">
-                                        {['day', 'week', 'month'].map(period => (
-                                            <button
-                                                key={period}
-                                                onClick={() => { setAnalyticsPeriod(period as any); fetchBookingsData(); }}
-                                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${analyticsPeriod === period
-                                                    ? 'bg-indigo-600 text-white'
-                                                    : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
-                                                    }`}
+                                </h3>
+                                <form onSubmit={handleCreateBooking} className="space-y-4">
+                                    <div>
+                                        <label className="block text-xs text-zinc-400 mb-1 uppercase tracking-wider">User</label>
+                                        <input
+                                            type="text"
+                                            placeholder="Player Name"
+                                            required
+                                            className="w-full bg-zinc-900 border-zinc-700 rounded-lg px-4 py-3 text-white placeholder:text-zinc-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all"
+                                            value={newBooking.userName}
+                                            onChange={e => setNewBooking({ ...newBooking, userName: e.target.value })}
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs text-zinc-400 mb-1 uppercase tracking-wider">Console</label>
+                                            <select
+                                                required
+                                                className="w-full bg-zinc-900 border-zinc-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all appearance-none"
+                                                value={newBooking.consoleNumber}
+                                                onChange={e => setNewBooking({ ...newBooking, consoleNumber: Number(e.target.value) })}
                                             >
-                                                {period.charAt(0).toUpperCase() + period.slice(1)}
-                                            </button>
-                                        ))}
+                                                <option value="" disabled>Select</option>
+                                                {consoles.filter(c => c.status === 'available').map(c => (
+                                                    <option key={c._id} value={c.consoleNumber}>{c.name}</option>
+                                                ))}
+                                                {getAvailableConsoles().length === 0 && <option value="" disabled>Full</option>}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-zinc-400 mb-1 uppercase tracking-wider">Time</label>
+                                            <select
+                                                className="w-full bg-zinc-900 border-zinc-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all appearance-none"
+                                                value={newBooking.duration}
+                                                onChange={e => setNewBooking({ ...newBooking, duration: Number(e.target.value) })}
+                                            >
+                                                <option value={0.5}>30m</option>
+                                                <option value={1}>1h</option>
+                                                <option value={1.5}>1.5h</option>
+                                                <option value={2}>2h</option>
+                                                <option value={2.5}>2.5h</option>
+                                                <option value={3}>3h</option>
+                                            </select>
+                                        </div>
                                     </div>
-                                </div>
 
-                                {/* Summary Cards */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                                    <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/20 border border-blue-500/30 p-6 rounded-lg">
-                                        <p className="text-blue-400 text-sm font-medium mb-1">Total Bookings</p>
-                                        <p className="text-3xl font-bold text-white">{analytics.summary.totalBookings}</p>
+                                    {/* Estimated Price Display */}
+                                    <div className="bg-indigo-500/10 rounded-lg p-3 border border-indigo-500/20 text-center">
+                                        <p className="text-indigo-300 text-xs uppercase tracking-widest mb-1">Total Amount</p>
+                                        <p className="text-xl font-bold text-indigo-400">NPR {newBooking.duration * 200}</p>
                                     </div>
-                                    <div className="bg-gradient-to-br from-green-500/20 to-green-600/20 border border-green-500/30 p-6 rounded-lg">
-                                        <p className="text-green-400 text-sm font-medium mb-1">Total Revenue</p>
-                                        <p className="text-3xl font-bold text-white">NPR {analytics.summary.totalRevenue}</p>
-                                    </div>
-                                    <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/20 border border-purple-500/30 p-6 rounded-lg">
-                                        <p className="text-purple-400 text-sm font-medium mb-1">Avg Duration</p>
-                                        <p className="text-3xl font-bold text-white">{analytics.summary.averageDuration}h</p>
-                                    </div>
-                                    <div className="bg-gradient-to-br from-yellow-500/20 to-yellow-600/20 border border-yellow-500/30 p-6 rounded-lg">
-                                        <p className="text-yellow-400 text-sm font-medium mb-1">Unpaid Amount</p>
-                                        <p className="text-3xl font-bold text-white">NPR {analytics.summary.unpaidRevenue}</p>
-                                    </div>
-                                </div>
 
-                                {/* Revenue by Console */}
-                                <div className="bg-zinc-800/30 p-6 rounded-lg border border-zinc-700/50">
-                                    <h3 className="text-lg font-medium text-white mb-4">Revenue by Console</h3>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        {analytics.revenueByConsole.map((item: any) => (
-                                            <div key={item.console} className="bg-zinc-800 p-4 rounded-lg">
-                                                <p className="text-zinc-400 text-sm mb-1">{item.console}</p>
-                                                <p className="text-2xl font-bold text-white mb-1">NPR {item.revenue}</p>
-                                                <p className="text-xs text-zinc-500">{item.bookings} bookings</p>
-                                            </div>
-                                        ))}
+                                    <button
+                                        type="submit"
+                                        className="w-full bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-500 font-bold tracking-wide uppercase shadow-lg shadow-indigo-600/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        disabled={getAvailableConsoles().length === 0}
+                                    >
+                                        Start Session
+                                    </button>
+                                </form>
+                            </div>
+
+                            {/* RIGHT COLUMN: Active Sessions List (Spans 2 cols) */}
+                            <div className="lg:col-span-2 space-y-4">
+                                <h3 className="text-lg font-medium text-white flex items-center gap-2">
+                                    Active Sessions
+                                </h3>
+                                <div className="bg-zinc-800/30 rounded-xl border border-zinc-700/50 overflow-hidden">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-sm text-zinc-400">
+                                            <thead className="bg-zinc-900/50 text-zinc-200 uppercase text-xs tracking-wider">
+                                                <tr>
+                                                    <th className="px-6 py-4">User</th>
+                                                    <th className="px-6 py-4">Console</th>
+                                                    <th className="px-6 py-4">Elapsed</th>
+                                                    <th className="px-6 py-4">Remaining</th>
+                                                    <th className="px-6 py-4">Amount</th>
+                                                    <th className="px-6 py-4 text-right">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-zinc-800/50">
+                                                {bookings.filter(b => b.status === 'active').map((booking: any) => (
+                                                    <tr key={booking._id} className="hover:bg-zinc-800/50 transition-colors">
+                                                        <td className="px-6 py-4 font-bold text-white">{booking.userName}</td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="bg-zinc-800 text-zinc-300 px-2 py-1 rounded text-xs border border-zinc-700">
+                                                                PS4-{booking.consoleNumber}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="text-green-400 font-mono">{getSessionDuration(booking.startTime)}</span>
+                                                        </td>
+                                                        <td className="px-6 py-4 font-mono text-zinc-500">
+                                                            {/* Simple logic for demo, ideally calculated */}
+                                                            {booking.duration}h Total
+                                                        </td>
+                                                        <td className="px-6 py-4 font-bold text-white">NPR {booking.totalAmount}</td>
+                                                        <td className="px-6 py-4 text-right">
+                                                            <button
+                                                                onClick={() => handleEndSessionClick(booking._id)}
+                                                                className="bg-red-500/10 hover:bg-red-500/20 text-red-500 px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wide border border-red-500/20 transition-all hover:border-red-500/50"
+                                                            >
+                                                                End Session
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {bookings.filter(b => b.status === 'active').length === 0 && (
+                                                    <tr>
+                                                        <td colSpan={6} className="px-6 py-12 text-center text-zinc-500">
+                                                            <p className="text-4xl mb-2">😴</p>
+                                                            <p>No active sessions</p>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
                                     </div>
                                 </div>
                             </div>
-                        )}
+                        </div>
+
+                        {/* Add Console Section (Moved Bottom) */}
+                        <div className="bg-black/20 p-6 rounded-xl border border-zinc-800 border-dashed">
+                            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                                <div>
+                                    <h3 className="text-lg font-medium text-zinc-400">Inventory Management</h3>
+                                    <p className="text-sm text-zinc-500">Add new units to your console fleet.</p>
+                                </div>
+                                <form onSubmit={handleAddConsole} className="flex gap-3 w-full md:w-auto">
+                                    <input
+                                        type="text"
+                                        placeholder="Console Name (e.g. PS4-5)"
+                                        className="bg-zinc-900 border-zinc-700 rounded-lg px-4 py-2 text-white placeholder:text-zinc-600 focus:ring-2 focus:ring-zinc-600 outline-none flex-1 md:w-64"
+                                        value={newConsoleName}
+                                        onChange={e => setNewConsoleName(e.target.value)}
+                                    />
+                                    <button
+                                        type="submit"
+                                        className="bg-zinc-800 text-white px-4 py-2 rounded-lg hover:bg-zinc-700 border border-zinc-700 font-medium transition-colors whitespace-nowrap"
+                                    >
+                                        + Add Unit
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+
+
                     </div>
                 )}
 
@@ -707,6 +801,171 @@ export default function AdminDashboard() {
                         </div>
                     </div>
                 )}
+
+                {activeTab === 'summary' && (() => {
+                    // Filter bookings based on active period
+                    const now = new Date();
+                    const getFilteredBookings = () => {
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+
+                        return bookings.filter(b => {
+                            if (b.status !== 'completed') return false;
+                            const bDate = new Date(b.startTime);
+                            if (analyticsPeriod === 'day') {
+                                return bDate >= today;
+                            } else if (analyticsPeriod === 'week') {
+                                const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                                return bDate >= weekAgo;
+                            } else if (analyticsPeriod === 'month') {
+                                const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                                return bDate >= monthAgo;
+                            }
+                            return true;
+                        });
+                    };
+
+                    const filteredBookings = getFilteredBookings();
+                    const totalRevenue = filteredBookings.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+                    const totalDuration = filteredBookings.reduce((sum, b) => sum + (b.duration || 0), 0);
+                    const avgDuration = filteredBookings.length > 0 ? (totalDuration / filteredBookings.length).toFixed(1) : 0;
+                    const unpaidRevenue = filteredBookings.filter(b => !b.isPaid).reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+
+
+                    return (
+                        <div className="space-y-6">
+                            {/* Revenue Analytics */}
+                            <div>
+                                <div className="flex items-center justify-between mb-6">
+                                    <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                                        Revenue Analytics
+                                    </h2>
+                                    <div className="bg-zinc-800 p-1 rounded-lg flex space-x-1">
+                                        {['day', 'week', 'month', 'all'].map(period => (
+                                            <button
+                                                key={period}
+                                                onClick={() => setAnalyticsPeriod(period as any)}
+                                                className={`px-4 py-1.5 rounded-md text-xs font-medium transition-all ${analyticsPeriod === period
+                                                    ? 'bg-indigo-600 text-white shadow-lg'
+                                                    : 'text-zinc-400 hover:text-white hover:bg-zinc-700'
+                                                    }`}
+                                            >
+                                                {period === 'all' ? 'All Time' : period.charAt(0).toUpperCase() + period.slice(1)}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Summary Cards */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                                    <div className="bg-zinc-800/50 border border-blue-500/20 p-6 rounded-xl hover:border-blue-500/40 transition-colors">
+                                        <p className="text-blue-400 text-xs font-semibold uppercase tracking-wider mb-2">Total Bookings</p>
+                                        <p className="text-3xl font-bold text-white">{filteredBookings.length}</p>
+                                    </div>
+                                    <div className="bg-zinc-800/50 border border-green-500/20 p-6 rounded-xl hover:border-green-500/40 transition-colors">
+                                        <p className="text-green-400 text-xs font-semibold uppercase tracking-wider mb-2">Total Revenue</p>
+                                        <p className="text-3xl font-bold text-white">NPR {totalRevenue}</p>
+                                    </div>
+                                    <div className="bg-zinc-800/50 border border-purple-500/20 p-6 rounded-xl hover:border-purple-500/40 transition-colors">
+                                        <p className="text-purple-400 text-xs font-semibold uppercase tracking-wider mb-2">Avg Duration</p>
+                                        <p className="text-3xl font-bold text-white">{avgDuration}h</p>
+                                    </div>
+                                    <div className="bg-zinc-800/50 border border-yellow-500/20 p-6 rounded-xl hover:border-yellow-500/40 transition-colors">
+                                        <p className="text-yellow-400 text-xs font-semibold uppercase tracking-wider mb-2">Unpaid <span className="text-yellow-600">(Pending)</span></p>
+                                        <p className="text-3xl font-bold text-white">NPR {unpaidRevenue}</p>
+                                    </div>
+                                </div>
+
+                                {/* Revenue by Console (Dynamic) */}
+                                <div className="bg-zinc-800/20 p-6 rounded-xl border border-zinc-700/50 mb-10">
+                                    <h3 className="text-lg font-medium text-white mb-6">Console Performance</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                        {consoles.map((console) => {
+                                            // Calculate revenue for this specific console from filtered bookings
+                                            const consoleBookings = filteredBookings.filter(b => b.consoleNumber === console.consoleNumber);
+                                            const consoleRevenue = consoleBookings.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+                                            const bookingCount = consoleBookings.length;
+
+                                            return (
+                                                <div key={console._id} className="bg-zinc-900/50 p-4 rounded-lg border border-zinc-700/50 flex flex-col justify-between hover:border-zinc-600 transition-colors">
+                                                    <div className="flex justify-between items-start mb-2">
+                                                        <span className="text-zinc-400 text-sm font-medium">{console.name}</span>
+                                                        <span className="text-indigo-400 text-xs bg-indigo-500/10 px-2 py-0.5 rounded">{bookingCount} sessions</span>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-2xl font-bold text-white">NPR {consoleRevenue}</p>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                        {consoles.length === 0 && <p className="text-zinc-500 text-sm italic">No consoles found. Add consoles to see analytics.</p>}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                                    Detailed History
+                                </h2>       
+                                <div className="bg-zinc-800/30 rounded-xl border border-zinc-700/50 overflow-hidden">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-sm text-zinc-400">
+                                            <thead className="bg-zinc-900/50 text-zinc-200 uppercase text-xs tracking-wider">
+                                                <tr>
+                                                    <th className="px-6 py-4">User</th>
+                                                    <th className="px-6 py-4">Console</th>
+                                                    <th className="px-6 py-4">Date</th>
+                                                    <th className="px-6 py-4">Time</th>
+                                                    <th className="px-6 py-4">Duration</th>
+                                                    <th className="px-6 py-4">Amount</th>
+                                                    <th className="px-6 py-4">Payment</th>
+                                                    <th className="px-6 py-4">Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-zinc-800">
+                                                {/* Show all completed bookings for history, or just filtered? Usually user wants history table to match analytics filter */}
+                                                {filteredBookings.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()).map((booking: any) => (
+                                                    <tr key={booking._id} className="hover:bg-zinc-800/30 transition-colors">
+                                                        <td className="px-6 py-4 font-medium text-white">{booking.userName}</td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="bg-zinc-800 px-2 py-1 rounded text-xs border border-zinc-700">PS4-{booking.consoleNumber}</span>
+                                                        </td>
+                                                        <td className="px-6 py-4">{new Date(booking.startTime).toLocaleDateString()}</td>
+                                                        <td className="px-6 py-4 text-xs font-mono">
+                                                            {new Date(booking.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                            <span className="text-zinc-600 mx-1">→</span>
+                                                            {booking.endTime ? new Date(booking.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}
+                                                        </td>
+                                                        <td className="px-6 py-4">{booking.duration}h</td>
+                                                        <td className="px-6 py-4 font-bold text-white">NPR {booking.totalAmount}</td>
+                                                        <td className="px-6 py-4">
+                                                            <span className={`px-2 py-1 rounded text-xs border ${booking.paymentMethod === 'Cash'
+                                                                ? 'bg-green-500/10 border-green-500/30 text-green-500'
+                                                                : 'bg-purple-500/10 border-purple-500/30 text-purple-500'
+                                                                }`}>
+                                                                {booking.paymentMethod || 'Cash'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="bg-zinc-800 text-zinc-400 px-2 py-1 rounded text-xs">Completed</span>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {filteredBookings.length === 0 && (
+                                                    <tr>
+                                                        <td colSpan={8} className="px-6 py-12 text-center text-zinc-500">
+                                                            No records found for this period
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })()}
 
                 {activeTab === 'hallofshame' && (
                     <div className="space-y-8">
@@ -984,6 +1243,55 @@ export default function AdminDashboard() {
                     </div>
                 )}
             </div>
-        </div>
+            {/* Payment Modal */}
+            {
+                showPaymentModal && (
+                    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+                        <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-md w-full">
+                            <h3 className="text-xl font-bold text-white mb-4">Complete Session & Payment</h3>
+
+                            <div className="mb-6">
+                                <label className="block text-sm text-zinc-400 mb-2">Payment Method</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        onClick={() => setPaymentMethod('Cash')}
+                                        className={`p-3 rounded-lg border text-center transition-all ${paymentMethod === 'Cash'
+                                            ? 'bg-green-500/20 border-green-500 text-green-500'
+                                            : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'
+                                            }`}
+                                    >
+                                        💵 Cash
+                                    </button>
+                                    <button
+                                        onClick={() => setPaymentMethod('UPI')}
+                                        className={`p-3 rounded-lg border text-center transition-all ${paymentMethod === 'UPI'
+                                            ? 'bg-purple-500/20 border-purple-500 text-purple-500'
+                                            : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'
+                                            }`}
+                                    >
+                                        📱 Online / UPI
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => { setShowPaymentModal(false); setSelectedBookingId(null); }}
+                                    className="flex-1 px-4 py-2 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={confirmEndSession}
+                                    className="flex-1 px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition-colors font-medium"
+                                >
+                                    Confirm Payment
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+        </div >
     );
 }

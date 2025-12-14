@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import dbConnect from '@/lib/dbConnect';
+import dbConnect from '@/lib/mongodb';
 import Booking from '@/models/Booking';
 import Console from '@/models/Console';
 
@@ -31,16 +31,19 @@ export async function PUT(
         if (body.action === 'end') {
             console.log('Ending session...');
             const endTime = new Date();
+            const { paymentMethod } = body;
 
             // Note: We do NOT recalculate price. User pays for the full booked slot regardless of actual usage.
 
             // Update booking
             booking.endTime = endTime;
+            booking.paymentMethod = paymentMethod || 'Cash'; // Default to Cash if not provided
+            booking.isPaid = true;
             // booking.duration and booking.totalAmount remain unchanged (Fixed Pricing)
 
             booking.status = 'completed';
             await booking.save();
-            console.log(`Booking ${id} marked completed with fixed price: ${booking.totalAmount}`);
+            console.log(`Booking ${id} marked completed with fixed price: ${booking.totalAmount}, Payment: ${booking.paymentMethod}`);
 
             // Free up the console
             console.log(`Freeing console ${booking.consoleNumber}...`);
