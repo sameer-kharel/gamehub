@@ -15,7 +15,7 @@ export default function AdminDashboard() {
     const [bookings, setBookings] = useState<IBooking[]>([]);
     const [consoles, setConsoles] = useState<IConsole[]>([]);
     const [analytics, setAnalytics] = useState<any>(null);
-    const [analyticsPeriod, setAnalyticsPeriod] = useState<'day' | 'week' | 'month'>('day');
+    const [analyticsPeriod, setAnalyticsPeriod] = useState<'day' | 'week' | 'month' | 'all'>('day');
     const [loading, setLoading] = useState(true);
 
     // Forms state
@@ -611,7 +611,7 @@ export default function AdminDashboard() {
                                             >
                                                 <option value="" disabled>Select</option>
                                                 {consoles.filter(c => c.status === 'available').map(c => (
-                                                    <option key={c._id} value={c.consoleNumber}>{c.name}</option>
+                                                    <option key={String(c._id)} value={c.consoleNumber}>{c.name}</option>
                                                 ))}
                                                 {getAvailableConsoles().length === 0 && <option value="" disabled>Full</option>}
                                             </select>
@@ -887,7 +887,7 @@ export default function AdminDashboard() {
                                             const bookingCount = consoleBookings.length;
 
                                             return (
-                                                <div key={console._id} className="bg-zinc-900/50 p-4 rounded-lg border border-zinc-700/50 flex flex-col justify-between hover:border-zinc-600 transition-colors">
+                                                <div key={String(console._id)} className="bg-zinc-900/50 p-4 rounded-lg border border-zinc-700/50 flex flex-col justify-between hover:border-zinc-600 transition-colors">
                                                     <div className="flex justify-between items-start mb-2">
                                                         <span className="text-zinc-400 text-sm font-medium">{console.name}</span>
                                                         <span className="text-indigo-400 text-xs bg-indigo-500/10 px-2 py-0.5 rounded">{bookingCount} sessions</span>
@@ -906,7 +906,7 @@ export default function AdminDashboard() {
                             <div>
                                 <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
                                     Detailed History
-                                </h2>       
+                                </h2>
                                 <div className="bg-zinc-800/30 rounded-xl border border-zinc-700/50 overflow-hidden">
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-left text-sm text-zinc-400">
